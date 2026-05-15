@@ -1,0 +1,21 @@
+[build]
+builder = "dockerfile"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+startCommand = "/livekit-server --config /etc/livekit/livekit.yaml"
+restartPolicyType = "always"
+
+[[services]]
+name = "livekit-server"
+
+[services.ports]
+# WebSocket signaling
+[[services.ports.http]]
+port = 7880
+# RTC TCP
+[[services.ports.tcp]]
+port = 7881
+# TURN UDP
+[[services.ports.udp]]
+port = 3478
