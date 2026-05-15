@@ -1,8 +1,15 @@
-FROM livekit/livekit-server:latest
+FROM livekit/livekit-server:latest AS livekit
 
-COPY livekit.yaml /etc/livekit/livekit.yaml
+FROM debian:bookworm-slim
 
-EXPOSE 7880 7881 3478/udp 5349
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash ca-certificates haproxy iptables dnsutils \
+    && rm -rf /var/lib/apt/lists/*
 
-ENTRYPOINT ["/livekit-server"]
-CMD ["--config", "/etc/livekit/livekit.yaml"]
+COPY --from=livekit /livekit-server /usr/local/bin/livekit-server
+
+COPY entrypoint.sh /entrypoint.sh
+
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
