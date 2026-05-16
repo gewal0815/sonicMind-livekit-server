@@ -1,7 +1,7 @@
 FROM livekit/livekit-server:latest AS livekit
 
 FROM alpine:3.19
-RUN apk add --no-cache bash haproxy iptables ca-certificates bind-tools
+RUN apk add --no-cache ca-certificates
 
 COPY --from=livekit /livekit-server /livekit-server
 RUN chmod +x /livekit-server
