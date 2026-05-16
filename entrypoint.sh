@@ -2,6 +2,16 @@
 
 set -euo pipefail
 
+# --- Required env var checks ---
+if [ -z "${LIVEKIT_API_KEY:-}" ]; then
+  echo "ERROR: LIVEKIT_API_KEY is not set. Add it to Railway environment variables."
+  exit 1
+fi
+if [ -z "${LIVEKIT_API_SECRET:-}" ]; then
+  echo "ERROR: LIVEKIT_API_SECRET is not set. Add it to Railway environment variables."
+  exit 1
+fi
+
 # --- Redis (optional — only needed for multi-node clustering) ---
 REDIS_CONFIG=""
 if [ -n "${REDIS_URL:-}" ]; then
