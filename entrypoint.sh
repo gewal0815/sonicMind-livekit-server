@@ -28,20 +28,9 @@ if [ -z "${LIVEKIT_API_SECRET:-}" ]; then
   exit 1
 fi
 
-# HTTP signaling port — Railway's $PORT
+# HTTP signaling port — Railway assigns $PORT for its HTTP proxy
 SIGNAL_PORT="${PORT:-8080}"
 echo "HTTP signaling port: $SIGNAL_PORT"
-
-# ICE TCP port must not collide with the HTTP port.
-# When Railway's TCP proxy is active it sets PORT = RAILWAY_TCP_APPLICATION_PORT,
-# so $PORT is often 7881 — livekit's own default ICE TCP port.
-# If they match, shift ICE TCP by one to avoid the bind conflict.
-if [ "$SIGNAL_PORT" = "7881" ]; then
-  ICE_TCP_PORT=7882
-else
-  ICE_TCP_PORT=7881
-fi
-echo "ICE TCP port: $ICE_TCP_PORT"
 
 mkdir -p /etc
 cat > /etc/livekit.yaml <<EOF
@@ -50,16 +39,13 @@ port: ${SIGNAL_PORT}
 bind_addresses:
   - "0.0.0.0"
 
-log_level: debug
+log_level: info
 
 keys:
   ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
 
 room:
   auto_create: true
-
-rtc:
-  tcp_port: ${ICE_TCP_PORT}
 
 turn:
   enabled: false
