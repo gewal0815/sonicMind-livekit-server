@@ -7,7 +7,6 @@ echo "========================================"
 echo " PORT                   = ${PORT:-NOT_SET}"
 echo " LIVEKIT_API_KEY        = ${LIVEKIT_API_KEY:+SET}"
 echo " LIVEKIT_API_SECRET     = ${LIVEKIT_API_SECRET:+SET}"
-echo " REDIS_URL              = ${REDIS_URL:+SET}"
 echo " RAILWAY_TCP_APP_PORT   = ${RAILWAY_TCP_APPLICATION_PORT:-NOT_SET}"
 echo " RAILWAY_TCP_PROXY_PORT = ${RAILWAY_TCP_PROXY_PORT:-NOT_SET}"
 echo "========================================"
@@ -33,26 +32,14 @@ fi
 SIGNAL_PORT="${PORT:-8080}"
 echo "HTTP signaling port: $SIGNAL_PORT"
 
-# ICE TCP port — MUST be different from HTTP port.
-# Use RAILWAY_TCP_APPLICATION_PORT if it exists and doesn't conflict.
-# Otherwise disable ICE TCP (tcp_port: 0) to prevent "address already in use".
+# ICE TCP: only enable if RAILWAY_TCP_APPLICATION_PORT is set AND differs from HTTP port
+# (same port = "address already in use" crash)
 ICE_TCP_YAML=""
 if [ -n "${RAILWAY_TCP_APPLICATION_PORT:-}" ] && [ "${RAILWAY_TCP_APPLICATION_PORT}" != "$SIGNAL_PORT" ]; then
   ICE_TCP_YAML="  tcp_port: ${RAILWAY_TCP_APPLICATION_PORT}"
-  echo "ICE TCP port: ${RAILWAY_TCP_APPLICATION_PORT} (Railway TCP proxy)"
+  echo "ICE TCP port: ${RAILWAY_TCP_APPLICATION_PORT}"
 else
-  echo "ICE TCP disabled (no TCP proxy or port would conflict with HTTP port)"
-fi
-
-# Redis (optional)
-REDIS_YAML=""
-if [ -n "${REDIS_URL:-}" ]; then
-  R_PASS=$(echo "$REDIS_URL" | sed -n 's|redis://[^:]*:\([^@]*\)@.*|\1|p')
-  R_HOSTPORT=$(echo "$REDIS_URL" | sed -n 's|redis://[^@]*@\(.*\)|\1|p')
-  if [ -n "$R_HOSTPORT" ]; then
-    REDIS_YAML=$(printf 'redis:\n  address: %s\n  password: %s' "$R_HOSTPORT" "$R_PASS")
-    echo "Redis: $R_HOSTPORT"
-  fi
+  echo "ICE TCP: disabled (no separate TCP proxy port configured)"
 fi
 
 mkdir -p /etc
@@ -67,8 +54,6 @@ log_level: info
 rtc:
   use_external_ip: true
 ${ICE_TCP_YAML}
-
-${REDIS_YAML}
 
 keys:
   ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
