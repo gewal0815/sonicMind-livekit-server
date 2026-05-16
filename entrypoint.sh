@@ -1,5 +1,5 @@
 #!/bin/bash
-set -euo pipefail
+set -uo pipefail
 
 echo "========================================"
 echo " SonicMind LiveKit Server — Starting"
@@ -11,17 +11,21 @@ echo " REDIS_URL          = ${REDIS_URL:+SET}"
 echo " RAILWAY_TCP_PROXY  = ${RAILWAY_TCP_PROXY_DOMAIN:-none}:${RAILWAY_TCP_PROXY_PORT:-none}"
 echo " TCP_APP_PORT       = ${RAILWAY_TCP_APPLICATION_PORT:-none}"
 echo "========================================"
+echo " OS: $(cat /etc/os-release 2>/dev/null | grep PRETTY_NAME | cut -d= -f2 || uname -a)"
+echo " Kernel: $(uname -r)"
+echo "========================================"
 
-# Verify livekit-server binary exists (official image puts it at /livekit-server)
+# Verify livekit-server binary
 LIVEKIT_BIN="/livekit-server"
 if [ ! -x "$LIVEKIT_BIN" ]; then
   LIVEKIT_BIN=$(command -v livekit-server 2>/dev/null || true)
 fi
 if [ -z "$LIVEKIT_BIN" ] || [ ! -x "$LIVEKIT_BIN" ]; then
-  echo "FATAL: livekit-server binary not found at /livekit-server or in PATH"
+  echo "FATAL: livekit-server binary not found"
   exit 1
 fi
 echo "livekit-server binary: $LIVEKIT_BIN"
+echo "livekit-server version: $("$LIVEKIT_BIN" --version 2>&1 || echo 'unknown')"
 
 # --- Required env var checks ---
 if [ -z "${LIVEKIT_API_KEY:-}" ]; then
@@ -59,15 +63,13 @@ if [ -n "$TCP_PROXY_PORT" ] && [ -n "$TCP_PROXY_DOMAIN" ] && [ -n "$TCP_APP_PORT
   echo "TCP proxy configured: ${TCP_PROXY_DOMAIN}:${TCP_PROXY_PORT} -> container:${TCP_APP_PORT}"
   ICE_TCP_PORT="$TCP_PROXY_PORT"
 
-  RESOLVED_IP=$(getent ahostsv4 "$TCP_PROXY_DOMAIN" 2>/dev/null | awk 'NR==1 {print $1}' || true)
-  if [ -z "$RESOLVED_IP" ]; then
-    RESOLVED_IP=$(getent hosts "$TCP_PROXY_DOMAIN" 2>/dev/null | awk '{print $1}' | head -1 || true)
-  fi
+  RESOLVED_IP=$(getent ahostsv4 "$TCP_PROXY_DOMAIN" 2>/dev/null | awk 'NR==1 {print $1}' || \
+                nslookup "$TCP_PROXY_DOMAIN" 2>/dev/null | awk '/^Address: /{print $2}' | head -1 || true)
   if [ -n "$RESOLVED_IP" ]; then
     NODE_IP="$RESOLVED_IP"
     echo "Resolved $TCP_PROXY_DOMAIN -> $NODE_IP"
   else
-    echo "WARNING: Could not resolve $TCP_PROXY_DOMAIN, will use use_external_ip=true"
+    echo "WARNING: Could not resolve $TCP_PROXY_DOMAIN, using use_external_ip=true"
     USE_EXTERNAL_IP="true"
   fi
 
@@ -108,12 +110,10 @@ port: ${SIGNAL_PORT}
 bind_addresses:
   - "0.0.0.0"
 
-log_level: info
+log_level: debug
 
 rtc:
   tcp_port: ${ICE_TCP_PORT}
-  port_range_start: 50000
-  port_range_end: 60000
   use_external_ip: ${USE_EXTERNAL_IP}
 
 ${REDIS_CONFIG:+${REDIS_CONFIG}}
@@ -134,8 +134,16 @@ echo "=============================="
 echo ""
 echo "Starting livekit-server on port ${SIGNAL_PORT} ..."
 
+# Run without exec so we capture the exit code for diagnostics
 if [ -n "$NODE_IP" ]; then
-  exec "$LIVEKIT_BIN" --config /etc/livekit.yaml --node-ip "$NODE_IP"
+  "$LIVEKIT_BIN" --config /etc/livekit.yaml --node-ip "$NODE_IP"
 else
-  exec "$LIVEKIT_BIN" --config /etc/livekit.yaml
+  "$LIVEKIT_BIN" --config /etc/livekit.yaml
 fi
+EXIT_CODE=$?
+
+echo ""
+echo "!!! livekit-server exited with code $EXIT_CODE !!!"
+echo "Sleeping 60s so logs can be read before container restarts..."
+sleep 60
+exit $EXIT_CODE
