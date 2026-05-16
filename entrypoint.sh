@@ -2,13 +2,24 @@
 
 set -euo pipefail
 
+echo "========================================"
+echo " SonicMind LiveKit Server — Starting"
+echo "========================================"
+echo " PORT               = ${PORT:-<not set, will use 8080>}"
+echo " LIVEKIT_API_KEY    = ${LIVEKIT_API_KEY:+SET (${#LIVEKIT_API_KEY} chars)}"
+echo " LIVEKIT_API_SECRET = ${LIVEKIT_API_SECRET:+SET (${#LIVEKIT_API_SECRET} chars)}"
+echo " REDIS_URL          = ${REDIS_URL:+SET}"
+echo " RAILWAY_TCP_PROXY  = ${RAILWAY_TCP_PROXY_DOMAIN:-<none>}:${RAILWAY_TCP_PROXY_PORT:-<none>}"
+echo " APP PORT           = ${RAILWAY_TCP_APPLICATION_PORT:-<none>}"
+echo "========================================"
+
 # --- Required env var checks ---
 if [ -z "${LIVEKIT_API_KEY:-}" ]; then
-  echo "ERROR: LIVEKIT_API_KEY is not set. Add it to Railway environment variables."
+  echo "FATAL: LIVEKIT_API_KEY is not set. Add it to Railway → livekit-server → Variables."
   exit 1
 fi
 if [ -z "${LIVEKIT_API_SECRET:-}" ]; then
-  echo "ERROR: LIVEKIT_API_SECRET is not set. Add it to Railway environment variables."
+  echo "FATAL: LIVEKIT_API_SECRET is not set. Add it to Railway → livekit-server → Variables."
   exit 1
 fi
 
