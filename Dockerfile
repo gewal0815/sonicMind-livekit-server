@@ -1,15 +1,12 @@
-FROM livekit/livekit-server:latest AS livekit
+FROM livekit/livekit-server:latest
 
-FROM debian:bookworm-slim
-
+# The official image is debian:bookworm-slim based.
+# Add tools needed for ICE TCP proxy fallback (haproxy) and DNS resolution.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    bash ca-certificates haproxy iptables dnsutils \
+    bash haproxy iptables dnsutils \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=livekit /livekit-server /usr/local/bin/livekit-server
-
 COPY entrypoint.sh /entrypoint.sh
-
 RUN chmod +x /entrypoint.sh
 
 ENTRYPOINT ["/entrypoint.sh"]

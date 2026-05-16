@@ -12,12 +12,16 @@ echo " RAILWAY_TCP_PROXY  = ${RAILWAY_TCP_PROXY_DOMAIN:-none}:${RAILWAY_TCP_PROX
 echo " TCP_APP_PORT       = ${RAILWAY_TCP_APPLICATION_PORT:-none}"
 echo "========================================"
 
-# Verify livekit-server binary exists
-if ! command -v livekit-server &>/dev/null; then
-  echo "FATAL: livekit-server binary not found in PATH"
+# Verify livekit-server binary exists (official image puts it at /livekit-server)
+LIVEKIT_BIN="/livekit-server"
+if [ ! -x "$LIVEKIT_BIN" ]; then
+  LIVEKIT_BIN=$(command -v livekit-server 2>/dev/null || true)
+fi
+if [ -z "$LIVEKIT_BIN" ] || [ ! -x "$LIVEKIT_BIN" ]; then
+  echo "FATAL: livekit-server binary not found at /livekit-server or in PATH"
   exit 1
 fi
-echo "livekit-server binary: $(command -v livekit-server)"
+echo "livekit-server binary: $LIVEKIT_BIN"
 
 # --- Required env var checks ---
 if [ -z "${LIVEKIT_API_KEY:-}" ]; then
@@ -131,7 +135,7 @@ echo ""
 echo "Starting livekit-server on port ${SIGNAL_PORT} ..."
 
 if [ -n "$NODE_IP" ]; then
-  exec livekit-server --config /etc/livekit.yaml --node-ip "$NODE_IP"
+  exec "$LIVEKIT_BIN" --config /etc/livekit.yaml --node-ip "$NODE_IP"
 else
-  exec livekit-server --config /etc/livekit.yaml
+  exec "$LIVEKIT_BIN" --config /etc/livekit.yaml
 fi
