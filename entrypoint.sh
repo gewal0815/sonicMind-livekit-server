@@ -2,21 +2,20 @@
 
 set -euo pipefail
 
-# Parse REDIS_URL into components
-if [ -z "${REDIS_URL:-}" ]; then
-  echo "ERROR: REDIS_URL is not set"
-  exit 1
+# --- Redis (optional — only needed for multi-node clustering) ---
+REDIS_CONFIG=""
+if [ -n "${REDIS_URL:-}" ]; then
+  REDIS_PASSWORD=$(echo "$REDIS_URL" | sed -n 's|redis://[^:]*:\([^@]*\)@.*|\1|p')
+  REDIS_HOST_PORT=$(echo "$REDIS_URL" | sed -n 's|redis://[^@]*@\(.*\)|\1|p')
+  if [ -n "$REDIS_HOST_PORT" ]; then
+    echo "Redis configured: $REDIS_HOST_PORT"
+    REDIS_CONFIG=$(printf 'redis:\n  address: %s\n  password: %s\n' "$REDIS_HOST_PORT" "$REDIS_PASSWORD")
+  else
+    echo "WARNING: Could not parse REDIS_URL, running without Redis"
+  fi
+else
+  echo "REDIS_URL not set — running single-node (no clustering)"
 fi
-
-REDIS_PASSWORD=$(echo "$REDIS_URL" | sed -n 's|redis://[^:]*:\([^@]*\)@.*|\1|p')
-REDIS_HOST_PORT=$(echo "$REDIS_URL" | sed -n 's|redis://[^@]*@\(.*\)|\1|p')
-
-if [ -z "$REDIS_HOST_PORT" ]; then
-  echo "ERROR: Could not parse REDIS_URL: $REDIS_URL"
-  exit 1
-fi
-
-echo "Parsed Redis address: $REDIS_HOST_PORT"
 
 # --- TCP Proxy Setup for ICE ---
 # Railway L7 HTTP proxy handles WebSocket signaling.
@@ -102,7 +101,7 @@ port: ${SIGNAL_PORT}
 bind_addresses:
   - "0.0.0.0"
 
-log_level: debug
+log_level: info
 
 rtc:
   tcp_port: ${ICE_TCP_PORT}
@@ -113,9 +112,7 @@ rtc:
   use_ice_lite: false
   enable_loopback_candidate: false
 
-redis:
-  address: ${REDIS_HOST_PORT}
-  password: ${REDIS_PASSWORD}
+${REDIS_CONFIG}
 
 keys:
   ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
