@@ -1,122 +1,104 @@
 #!/bin/bash
-
 set -euo pipefail
 
 echo "========================================"
 echo " SonicMind LiveKit Server — Starting"
 echo "========================================"
-echo " PORT               = ${PORT:-<not set, will use 8080>}"
+echo " PORT               = ${PORT:-<not set, defaulting to 8080>}"
 echo " LIVEKIT_API_KEY    = ${LIVEKIT_API_KEY:+SET (${#LIVEKIT_API_KEY} chars)}"
 echo " LIVEKIT_API_SECRET = ${LIVEKIT_API_SECRET:+SET (${#LIVEKIT_API_SECRET} chars)}"
 echo " REDIS_URL          = ${REDIS_URL:+SET}"
-echo " RAILWAY_TCP_PROXY  = ${RAILWAY_TCP_PROXY_DOMAIN:-<none>}:${RAILWAY_TCP_PROXY_PORT:-<none>}"
-echo " APP PORT           = ${RAILWAY_TCP_APPLICATION_PORT:-<none>}"
+echo " RAILWAY_TCP_PROXY  = ${RAILWAY_TCP_PROXY_DOMAIN:-none}:${RAILWAY_TCP_PROXY_PORT:-none}"
+echo " TCP_APP_PORT       = ${RAILWAY_TCP_APPLICATION_PORT:-none}"
 echo "========================================"
+
+# Verify livekit-server binary exists
+if ! command -v livekit-server &>/dev/null; then
+  echo "FATAL: livekit-server binary not found in PATH"
+  exit 1
+fi
+echo "livekit-server binary: $(command -v livekit-server)"
 
 # --- Required env var checks ---
 if [ -z "${LIVEKIT_API_KEY:-}" ]; then
-  echo "FATAL: LIVEKIT_API_KEY is not set. Add it to Railway → livekit-server → Variables."
+  echo "FATAL: LIVEKIT_API_KEY is not set. Add it to Railway -> livekit-server -> Variables."
   exit 1
 fi
 if [ -z "${LIVEKIT_API_SECRET:-}" ]; then
-  echo "FATAL: LIVEKIT_API_SECRET is not set. Add it to Railway → livekit-server → Variables."
+  echo "FATAL: LIVEKIT_API_SECRET is not set. Add it to Railway -> livekit-server -> Variables."
   exit 1
 fi
 
-# --- Redis (optional — only needed for multi-node clustering) ---
+# --- Redis (optional) ---
 REDIS_CONFIG=""
 if [ -n "${REDIS_URL:-}" ]; then
   REDIS_PASSWORD=$(echo "$REDIS_URL" | sed -n 's|redis://[^:]*:\([^@]*\)@.*|\1|p')
   REDIS_HOST_PORT=$(echo "$REDIS_URL" | sed -n 's|redis://[^@]*@\(.*\)|\1|p')
   if [ -n "$REDIS_HOST_PORT" ]; then
     echo "Redis configured: $REDIS_HOST_PORT"
-    REDIS_CONFIG=$(printf 'redis:\n  address: %s\n  password: %s\n' "$REDIS_HOST_PORT" "$REDIS_PASSWORD")
-  else
-    echo "WARNING: Could not parse REDIS_URL, running without Redis"
+    REDIS_CONFIG=$(printf 'redis:\n  address: %s\n  password: %s' "$REDIS_HOST_PORT" "$REDIS_PASSWORD")
   fi
 else
-  echo "REDIS_URL not set — running single-node (no clustering)"
+  echo "REDIS_URL not set - running single-node (no clustering)"
 fi
 
-# --- TCP Proxy Setup for ICE ---
-# Railway L7 HTTP proxy handles WebSocket signaling.
-# Railway TCP proxy (L4) exposes a container port as public TCP for WebRTC ICE.
-#
-# LiveKit listens on PROXY_PORT (advertised in ICE candidates).
-# We redirect APP_PORT → PROXY_PORT so Railway can reach it.
-
+# --- TCP Proxy for ICE ---
 TCP_PROXY_DOMAIN="${RAILWAY_TCP_PROXY_DOMAIN:-}"
 TCP_PROXY_PORT="${RAILWAY_TCP_PROXY_PORT:-}"
 TCP_APP_PORT="${RAILWAY_TCP_APPLICATION_PORT:-}"
 
-NODE_IP="0.0.0.0"
 ICE_TCP_PORT="7881"
 USE_EXTERNAL_IP="false"
-NODE_IP_MODE="${LIVEKIT_NODE_IP_MODE:-proxy}"
+NODE_IP=""
 
 if [ -n "$TCP_PROXY_PORT" ] && [ -n "$TCP_PROXY_DOMAIN" ] && [ -n "$TCP_APP_PORT" ]; then
-  echo "TCP proxy: ${TCP_PROXY_DOMAIN}:${TCP_PROXY_PORT} → container:${TCP_APP_PORT}"
-
-  if [ "$NODE_IP_MODE" = "auto" ]; then
-    NODE_IP=""
-    USE_EXTERNAL_IP="true"
-    echo "Node IP mode: auto (use_external_ip=true)"
-  else
-    RESOLVED_IP=$(getent ahostsv4 "$TCP_PROXY_DOMAIN" 2>/dev/null | awk 'NR==1 {print $1}' || true)
-    if [ -z "$RESOLVED_IP" ]; then
-      RESOLVED_IP=$(getent hosts "$TCP_PROXY_DOMAIN" 2>/dev/null | awk '{print $1}' | head -1 || true)
-    fi
-    if [ -n "$RESOLVED_IP" ]; then
-      NODE_IP="$RESOLVED_IP"
-      echo "Resolved ${TCP_PROXY_DOMAIN} → ${NODE_IP}"
-    else
-      echo "WARNING: Could not resolve ${TCP_PROXY_DOMAIN}, falling back to 0.0.0.0"
-    fi
-  fi
-
+  echo "TCP proxy configured: ${TCP_PROXY_DOMAIN}:${TCP_PROXY_PORT} -> container:${TCP_APP_PORT}"
   ICE_TCP_PORT="$TCP_PROXY_PORT"
 
-  if [ "$TCP_APP_PORT" != "$ICE_TCP_PORT" ]; then
-    echo "Setting up redirect: ${TCP_APP_PORT} → ${ICE_TCP_PORT}"
+  RESOLVED_IP=$(getent ahostsv4 "$TCP_PROXY_DOMAIN" 2>/dev/null | awk 'NR==1 {print $1}' || true)
+  if [ -z "$RESOLVED_IP" ]; then
+    RESOLVED_IP=$(getent hosts "$TCP_PROXY_DOMAIN" 2>/dev/null | awk '{print $1}' | head -1 || true)
+  fi
+  if [ -n "$RESOLVED_IP" ]; then
+    NODE_IP="$RESOLVED_IP"
+    echo "Resolved $TCP_PROXY_DOMAIN -> $NODE_IP"
+  else
+    echo "WARNING: Could not resolve $TCP_PROXY_DOMAIN, will use use_external_ip=true"
+    USE_EXTERNAL_IP="true"
+  fi
 
+  if [ "$TCP_APP_PORT" != "$ICE_TCP_PORT" ]; then
+    echo "Setting up port redirect: $TCP_APP_PORT -> $ICE_TCP_PORT"
     if iptables -t nat -A PREROUTING -p tcp --dport "${TCP_APP_PORT}" -j REDIRECT --to-port "${ICE_TCP_PORT}" 2>/dev/null; then
       echo "iptables redirect configured"
     else
-      echo "iptables redirect failed, falling back to haproxy"
-
+      echo "iptables failed, starting haproxy fallback"
       cat > /tmp/haproxy.cfg <<HACFG
 global
   log stdout format raw local0 info
-
 defaults
   mode tcp
   timeout connect 5s
   timeout client 300s
   timeout server 300s
-  log global
-  option tcplog
-
 listen ice_forwarder
   bind 0.0.0.0:${TCP_APP_PORT}
   server livekit 127.0.0.1:${ICE_TCP_PORT}
-
 HACFG
-
-      haproxy -f /tmp/haproxy.cfg -D
-      echo "haproxy started"
+      haproxy -f /tmp/haproxy.cfg -D && echo "haproxy started"
     fi
-  else
-    echo "TCP application port matches proxy port; no forwarder needed"
   fi
 else
-  echo "No TCP proxy configured, using default tcp_port=7881"
+  echo "No TCP proxy - ICE will use server auto-detection"
+  USE_EXTERNAL_IP="true"
 fi
 
-# Signaling port (Railway HTTP port)
 SIGNAL_PORT="${PORT:-8080}"
 
-# Generate livekit.yaml
-cat > /etc/livekit.yaml <<EOF
+echo ""
+echo "Generating /etc/livekit.yaml ..."
+
+cat > /etc/livekit.yaml <<LKEOF
 port: ${SIGNAL_PORT}
 
 bind_addresses:
@@ -126,14 +108,11 @@ log_level: info
 
 rtc:
   tcp_port: ${ICE_TCP_PORT}
-  port_range_start: 0
-  port_range_end: 0
+  port_range_start: 50000
+  port_range_end: 60000
   use_external_ip: ${USE_EXTERNAL_IP}
-  force_tcp: false
-  use_ice_lite: false
-  enable_loopback_candidate: false
 
-${REDIS_CONFIG}
+${REDIS_CONFIG:+${REDIS_CONFIG}}
 
 keys:
   ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
@@ -143,19 +122,13 @@ room:
 
 turn:
   enabled: false
+LKEOF
 
-EOF
-
-echo ""
-echo "=== LiveKit Config ==="
+echo "=== Generated livekit.yaml ==="
 cat /etc/livekit.yaml
+echo "=============================="
 echo ""
-echo "=== Starting LiveKit ==="
-echo "  Signaling: ${SIGNAL_PORT}"
-echo "  ICE TCP:   ${ICE_TCP_PORT}"
-echo "  Node IP:   ${NODE_IP:-auto}"
-echo "  TCP proxy: ${TCP_PROXY_DOMAIN:-none}:${TCP_PROXY_PORT:-none} → container:${TCP_APP_PORT:-none}"
-echo ""
+echo "Starting livekit-server on port ${SIGNAL_PORT} ..."
 
 if [ -n "$NODE_IP" ]; then
   exec livekit-server --config /etc/livekit.yaml --node-ip "$NODE_IP"
