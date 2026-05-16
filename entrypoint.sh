@@ -32,15 +32,6 @@ fi
 SIGNAL_PORT="${PORT:-8080}"
 echo "HTTP signaling port: $SIGNAL_PORT"
 
-# ICE TCP: only enable if RAILWAY_TCP_APPLICATION_PORT is set AND differs from HTTP port
-# (same port = "address already in use" crash)
-ICE_TCP_YAML=""
-if [ -n "${RAILWAY_TCP_APPLICATION_PORT:-}" ] && [ "${RAILWAY_TCP_APPLICATION_PORT}" != "$SIGNAL_PORT" ]; then
-  ICE_TCP_YAML="  tcp_port: ${RAILWAY_TCP_APPLICATION_PORT}"
-  echo "ICE TCP port: ${RAILWAY_TCP_APPLICATION_PORT}"
-else
-  echo "ICE TCP: disabled (no separate TCP proxy port configured)"
-fi
 
 mkdir -p /etc
 cat > /etc/livekit.yaml <<EOF
@@ -49,11 +40,7 @@ port: ${SIGNAL_PORT}
 bind_addresses:
   - "0.0.0.0"
 
-log_level: info
-
-rtc:
-  use_external_ip: true
-${ICE_TCP_YAML}
+log_level: debug
 
 keys:
   ${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}
