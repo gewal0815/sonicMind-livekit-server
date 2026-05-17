@@ -11,6 +11,8 @@ echo " REDIS_URL                    = ${REDIS_URL:+SET}"
 echo " RAILWAY_TCP_PROXY_DOMAIN     = ${RAILWAY_TCP_PROXY_DOMAIN:-NOT_SET}"
 echo " RAILWAY_TCP_PROXY_PORT       = ${RAILWAY_TCP_PROXY_PORT:-NOT_SET}"
 echo " RAILWAY_TCP_APPLICATION_PORT = ${RAILWAY_TCP_APPLICATION_PORT:-NOT_SET}"
+echo " LIVEKIT_WEBHOOK_URL          = ${LIVEKIT_WEBHOOK_URL:+SET}"
+echo " LIVEKIT_WEBHOOK_URLS         = ${LIVEKIT_WEBHOOK_URLS:+SET}"
 echo "========================================"
 
 if ! command -v livekit-server >/dev/null 2>&1; then
@@ -113,6 +115,30 @@ EOF
 )"
 fi
 
+WEBHOOK_BLOCK=""
+WEBHOOK_URLS_RAW="${LIVEKIT_WEBHOOK_URLS:-${LIVEKIT_WEBHOOK_URL:-}}"
+if [ -n "$WEBHOOK_URLS_RAW" ]; then
+  WEBHOOK_URLS_BLOCK=""
+  IFS=',' read -ra WEBHOOK_URL_ITEMS <<< "$WEBHOOK_URLS_RAW"
+  for raw_url in "${WEBHOOK_URL_ITEMS[@]}"; do
+    url="$(echo "$raw_url" | xargs)"
+    if [ -n "$url" ]; then
+      WEBHOOK_URLS_BLOCK="${WEBHOOK_URLS_BLOCK}    - ${url}
+"
+    fi
+  done
+  if [ -n "$WEBHOOK_URLS_BLOCK" ]; then
+    WEBHOOK_BLOCK="$(cat <<EOF
+
+webhook:
+  api_key: ${LIVEKIT_API_KEY}
+  urls:
+${WEBHOOK_URLS_BLOCK}
+EOF
+)"
+  fi
+fi
+
 cat > /etc/livekit.yaml <<EOF
 port: ${SIGNAL_PORT}
 
@@ -139,6 +165,7 @@ room:
 
 turn:
   enabled: false
+${WEBHOOK_BLOCK}
 EOF
 
 echo ""
@@ -151,6 +178,11 @@ if [ -n "${REDIS_URL:-}" ]; then
   echo "Redis: enabled"
 else
   echo "Redis: disabled"
+fi
+if [ -n "$WEBHOOK_BLOCK" ]; then
+  echo "Webhooks: enabled"
+else
+  echo "Webhooks: disabled"
 fi
 echo "================================"
 echo ""
