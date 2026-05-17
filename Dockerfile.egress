@@ -1,0 +1,14 @@
+FROM livekit/egress:latest
+
+USER root
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY entrypoint-egress.sh /entrypoint-egress.sh
+RUN chmod +x /entrypoint-egress.sh
+
+USER egress
+
+ENTRYPOINT ["/entrypoint-egress.sh"]
