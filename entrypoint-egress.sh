@@ -127,5 +127,4 @@ echo "chrome_sandbox: ${ENABLE_CHROME_SANDBOX}"
 echo "======================================"
 echo ""
 
-export EGRESS_CONFIG_FILE="$CONFIG_FILE"
-exec /entrypoint.sh
+exec egress --config "$CONFIG_FILE"
